@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <climits>
 
-int NUM_VERTICES = 99000;  // Variable, not const, smaller for online compilers
+int NUM_VERTICES = 99000;  
 
 int getMinVertex(std::vector<int>& distances, std::vector<bool>& visited) {
     int minDist = INT_MAX;
