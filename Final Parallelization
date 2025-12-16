@@ -1,0 +1,102 @@
+#include <iostream>
+#include <vector>
+#include <chrono>
+#include <cstdlib>
+#include <climits>
+#include <omp.h>
+
+int NUM_VERTICES = 100;
+
+// Parallel min-vertex selection (race-free)
+int getMinVertexParallel(const std::vector<int>& distances, const std::vector<char>& visited) {
+    int globalMin = INT_MAX;
+    int globalIdx = -1;
+
+    #pragma omp parallel
+    {
+        int localMin = INT_MAX;
+        int localIdx = -1;
+
+        #pragma omp for nowait
+        for (int i = 0; i < NUM_VERTICES; ++i) {
+            if (!visited[i]) {
+                int d = distances[i];
+                if (d < localMin || (d == localMin && i < localIdx)) {
+                    localMin = d;
+                    localIdx = i;
+                }
+            }
+        }
+
+        #pragma omp critical
+        {
+            if (localIdx != -1) {
+                if (localMin < globalMin || (localMin == globalMin && localIdx < globalIdx)) {
+                    globalMin = localMin;
+                    globalIdx = localIdx;
+                }
+            }
+        }
+    }
+
+    return globalIdx;
+}
+
+void runDijkstraParallel(std::vector<std::vector<int>>& graph, int source) {
+    std::vector<int> distances(NUM_VERTICES, INT_MAX);
+    std::vector<char> visited(NUM_VERTICES, 0);
+
+    distances[source] = 0;
+
+    double timeGetMin = 0.0, timeUpdate = 0.0;
+    auto startTotal = std::chrono::high_resolution_clock::now();
+
+    for (int count = 0; count < NUM_VERTICES - 1; ++count) {
+
+        // --- Time-consuming section #1: GetMinVertex ---
+        auto startGetMin = std::chrono::high_resolution_clock::now();
+        int u = getMinVertexParallel(distances, visited);
+        auto endGetMin = std::chrono::high_resolution_clock::now();
+        timeGetMin += std::chrono::duration<double>(endGetMin - startGetMin).count();
+
+        if (u == -1) break;   // safety for disconnected graphs
+        visited[u] = 1;
+
+        // --- Time-consuming section #2: Relax/update distances ---
+        auto startUpdate = std::chrono::high_resolution_clock::now();
+
+        #pragma omp parallel for
+        for (int v = 0; v < NUM_VERTICES; ++v) {
+            if (!visited[v] && graph[u][v] != 0 && distances[u] != INT_MAX) {
+                int alt = distances[u] + graph[u][v];
+                if (alt < distances[v]) {
+                    distances[v] = alt; // safe: each v handled by exactly one thread
+                }
+            }
+        }
+
+        auto endUpdate = std::chrono::high_resolution_clock::now();
+        timeUpdate += std::chrono::duration<double>(endUpdate - startUpdate).count();
+    }
+
+    auto endTotal = std::chrono::high_resolution_clock::now();
+
+    std::cout << "GetMin Vertex Total Time (parallel): " << timeGetMin << " seconds\n";
+    std::cout << "Distance Update Total Time (parallel): " << timeUpdate << " seconds\n";
+    std::cout << "Total Execution Time (parallel): "
+              << std::chrono::duration<double>(endTotal - startTotal).count()
+              << " seconds\n";
+}
+
+int main() {
+    std::vector<std::vector<int>> graph(NUM_VERTICES, std::vector<int>(NUM_VERTICES, 0));
+
+    for (int i = 0; i < NUM_VERTICES; ++i) {
+        for (int j = 0; j < NUM_VERTICES; ++j) {
+            if (i != j) graph[i][j] = rand() % 50 + 1;
+        }
+    }
+
+    runDijkstraParallel(graph, 0);
+    return 0;
+}
